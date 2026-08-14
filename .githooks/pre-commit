@@ -1,0 +1,132 @@
+#!/bin/sh
+
+# 現在のブランチ名を取得
+branch=$(git rev-parse --abbrev-ref HEAD)
+
+# main, qaブランチではcommitできません。
+if [ "$branch" = "main" ] || [ "$branch" = "qa" ]; then
+  echo "❌ Commits are not allowed on the $branch branch. Please use another branch."
+  exit 1
+fi
+
+# =======================================================
+# renv.lock チェック (ステージングされた内容を確認)
+# =======================================================
+echo "🔍 Checking renv.lock..."
+
+# 1. renv.lock が今回のコミットで追加/更新されているか確認
+if ! git diff --cached --name-only --diff-filter=ACMR -- renv.lock | grep -qx 'renv.lock'; then
+  # ファイルが存在しない/変更がない/削除された場合はチェック対象外として正常終了
+  echo " renv.lock not added or modified in this commit, skipping check."
+  exit 0
+fi
+
+# jq が利用可能かチェック（未インストールの場合は明示的にエラー）
+if ! command -v jq >/dev/null 2>&1; then
+  echo "⚠️  jq not found. Skipping renv.lock validation."
+  echo "✔ Check complete"
+  exit 0
+fi
+
+# 2. JSON 構造チェック
+if ! git show :renv.lock | jq -e . >/dev/null 2>&1; then
+  echo "❌ Invalid JSON format in staged renv.lock."
+  exit 1
+fi
+
+# 3. 構造チェック ("R" ノードと "Repositories" ノード)
+if ! git show :renv.lock | grep -q '"R":' || ! git show :renv.lock | grep -q '"Repositories":'; then
+  echo "❌ Invalid format for renv.lock ('R' or 'Repositories' node not found)."
+  exit 1
+fi
+
+# 4. URL チェック (Repositories ノード内の URL が指定のドメインで始まっているか)
+ALLOWED_URL_PREFIX="https://aegisrspm."
+
+# awk を使用して Repositories ブロック内の URL のみを抽出・検証
+ERROR_MSG=$(git show :renv.lock | awk -v prefix="$ALLOWED_URL_PREFIX" '
+/"Repositories": \[/ { in_repo = 1; next; }
+in_repo && /\]/ { in_repo = 0; exit; } # リスト終了（簡易判定）
+in_repo && /"URL":/ {
+  # 行から URL 文字列を抽出: "URL": "VALUE", -> VALUE
+  line = $0;
+  sub(/.*"URL": "/, "", line); # キー部分削除
+  sub(/".*/, "", line);        # 末尾の " 以降を削除
+
+  # prefix で始まっているか確認
+  if (substr(line, 1, length(prefix)) != prefix) {
+    print "❌ Invalid repository URL detected: " line;
+    exit 1;
+  }
+}
+')
+EXIT_CODE=$?
+
+# awk の終了コードがエラー(1)ならスクリプトを止める
+if [ $EXIT_CODE -ne 0 ]; then
+  echo "$ERROR_MSG"
+  echo "❌ URL must start with ${ALLOWED_URL_PREFIX}"
+  exit 1
+fi
+
+# 5. Packages セクション内の各パッケージを検証
+
+# パッケージが存在しない場合はスキップ
+PKG_COUNT=$(git show :renv.lock | jq '.Packages // {} | length' 2>/dev/null)
+if [ "$PKG_COUNT" -eq 0 ]; then
+  echo "✔ Check complete"
+  exit 0
+fi
+
+# 許可されたリポジトリ名一覧を取得
+ALLOWED_REPO_NAMES_JSON=$(git show :renv.lock | jq -c '[.R.Repositories[].Name]' 2>/dev/null)
+
+# チェック除外対象パッケージ
+EXCLUDE_PACKAGES='["renv"]'
+
+HAS_ERROR=0
+
+# 4-a. Source が "Repository" 以外のパッケージを検出
+NON_REPO_PACKAGES=$(git show :renv.lock | jq -r '
+  [.Packages // {} | to_entries[] |
+    select(.value.Source != "Repository") |
+    "\(.key) (Source: \(.value.Source // "N/A"))"
+  ] | join("\n")' 2>/dev/null)
+
+if [ -n "$NON_REPO_PACKAGES" ]; then
+  echo "❌ The following packages have invalid Source:"
+  echo "$NON_REPO_PACKAGES" | while IFS= read -r line; do
+    echo "   - $line"
+  done
+  HAS_ERROR=1
+fi
+
+# 4-b. Repository フィールドが許可済み Name に含まれないパッケージを検出
+INVALID_REPO_PACKAGES=$(git show :renv.lock | jq -r --arg prefix "$ALLOWED_URL_PREFIX" --argjson allowed "$ALLOWED_REPO_NAMES_JSON" --argjson exclude "$EXCLUDE_PACKAGES" '
+  [.Packages // {} | to_entries[] |
+    select(.key | IN($exclude[]) | not) |
+    select(.value.Source == "Repository") |
+    select(
+      (.value.Repository == null) or
+      (
+        (.value.Repository | IN($allowed[]) | not) and
+        (.value.Repository | startswith($prefix) | not)
+      )
+    ) |
+    "\(.key) (Repository: \(.value.Repository // "N/A"))"
+  ] | join("\n")' 2>/dev/null)
+
+if [ -n "$INVALID_REPO_PACKAGES" ]; then
+  echo "❌ The following packages are not from allowed repositories:"
+  echo "$INVALID_REPO_PACKAGES" | while IFS= read -r line; do
+    echo "   - $line"
+  done
+  HAS_ERROR=1
+fi
+
+if [ "$HAS_ERROR" -ne 0 ]; then
+  exit 1
+fi
+
+echo "✔ Check complete"
+exit 0
