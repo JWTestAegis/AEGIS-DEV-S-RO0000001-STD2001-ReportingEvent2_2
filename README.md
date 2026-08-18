@@ -60,3 +60,9 @@
 11) Don't take a snapshot of renv.lock before merging to main branch
 
 12) Commit and push to your own branch.
+
+PullRequest作成する時、下記リンクを押下してください。
+dev=>qa
+https://github.com/JWTestAegis/AEGIS-DEV-S-RO0000001-STD2001-ReportingEvent2_2/compare/qa...dev?expand=1
+qa=>main
+https://github.com/JWTestAegis/AEGIS-DEV-S-RO0000001-STD2001-ReportingEvent2_2/compare/main…qa?expand=1
