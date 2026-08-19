@@ -61,12 +61,14 @@
 
 12) Commit and push to your own branch.
 
+
+=============
 PullRequest作成する時、下記リンクを押下してください。
 
-dev=>qa
+[クリックして　dev=>qa　のPRを作成](https://github.com/JWTestAegis/AEGIS-DEV-S-RO0000001-STD2001-ReportingEvent2_2/compare/qa...dev?expand=1)
 
-https://github.com/JWTestAegis/AEGIS-DEV-S-RO0000001-STD2001-ReportingEvent2_2/compare/qa...dev?expand=1
+[クリックして　qa=>main　のPRを作成](https://github.com/JWTestAegis/AEGIS-DEV-S-RO0000001-STD2001-ReportingEvent2_2/compare/main…qa?expand=1)
 
-qa=>main
+[クリックして　dev=>qa　のPRを作成](../../compare/qa...dev?expand=1)
 
-https://github.com/JWTestAegis/AEGIS-DEV-S-RO0000001-STD2001-ReportingEvent2_2/compare/main…qa?expand=1
+[クリックして　qa=>main　のPRを作成](../../compare/main…qa?expand=1)
